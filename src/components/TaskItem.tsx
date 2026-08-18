@@ -3,7 +3,7 @@ import classnames from 'classnames';
 import dayjs from 'dayjs';
 import Checkbox from 'rc-checkbox';
 import { ArrowDownCircle, BrightnessUp } from 'tabler-icons-react';
-import { TaskEntityObject } from '../models/TaskEntity';
+import { TaskEntityObject, TaskMarker } from '../models/TaskEntity';
 import 'rc-checkbox/assets/index.css';
 import { useRecoilValue } from 'recoil';
 import { taskMarkersState, userConfigsState } from '../state/user-configs';
@@ -50,12 +50,18 @@ const TaskItem: React.FC<ITaskItemProps> = (props) => {
   };
 
   const toggleStatus = async () => {
-    await toggleTaskStatus(task, { marker: preferredTodo as string });
+    await toggleTaskStatus(task, {
+      marker:
+        task.graphMode === 'db'
+          ? TaskMarker.TODO
+          : (preferredTodo as string) || TaskMarker.LATER,
+    });
     setChecked(!checked);
+    onChange();
   };
 
-  const toggleMarker = () => {
-    toggleTaskMarker(task, { markerGroup: taskMarkers });
+  const toggleMarker = async () => {
+    await toggleTaskMarker(task, { markerGroup: taskMarkers });
     onChange();
   };
 
@@ -100,7 +106,7 @@ const TaskItem: React.FC<ITaskItemProps> = (props) => {
                   })}
                 >
                   {dayjs(task.scheduled.toString(), 'YYYYMMDD').format(
-                    fixPreferredDateFormat(preferredDateFormat!),
+                    fixPreferredDateFormat(preferredDateFormat ?? 'yyyy-MM-dd'),
                   )}
                 </time>
               )}
@@ -109,8 +115,8 @@ const TaskItem: React.FC<ITaskItemProps> = (props) => {
           {isTodayTask(task) ? (
             <div
               className="pl-2 pr-1"
-              onClick={() => {
-                setTaskScheduled(task, null)
+              onClick={async () => {
+                await setTaskScheduled(task, null);
                 onChange();
               }}
             >
@@ -125,8 +131,8 @@ const TaskItem: React.FC<ITaskItemProps> = (props) => {
           ) : (
             <div
               className="pl-2 pr-1"
-              onClick={() => {
-                setTaskScheduled(task, new Date());
+              onClick={async () => {
+                await setTaskScheduled(task, new Date());
                 onChange();
               }}
             >

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "vitest run",
     "preinstall": "npx only-allow pnpm"
   },
   "license": "MIT",
@@ -51,11 +52,13 @@
     "vite": "3.2.3",
     "vite-plugin-logseq": "1.1.2",
     "vite-plugin-windicss": "1.8.8",
+    "vitest": "0.34.6",
     "windicss": "3.5.6"
   },
   "logseq": {
     "id": "logseq-plugin-todo",
     "title": "Todo list",
-    "icon": "./logo.svg"
+    "icon": "./logo.svg",
+    "supportsDB": true
   }
 }

@@ -13,6 +13,9 @@ import {
 } from '../state/filter';
 import { themeStyleState } from '../state/theme';
 import { settingsState } from '../state/settings';
+import { graphModeState } from '../state/graph';
+import { statusNamesMatch } from '../logseq-db';
+import { TaskPriority } from '../models/TaskEntity';
 
 const TaskFilter: React.FC = () => {
   const [marker, setMarker] = useRecoilState(markerState);
@@ -21,6 +24,7 @@ const TaskFilter: React.FC = () => {
   const taskMarkers = useRecoilValue(taskMarkersState);
   const themeStyle = useRecoilValue(themeStyleState);
   const settings = useRecoilValue(settingsState);
+  const graphMode = useRecoilValue(graphModeState);
 
   const markerOptions = React.useMemo(() => {
     return taskMarkers.reduce(
@@ -32,13 +36,18 @@ const TaskFilter: React.FC = () => {
   }, [taskMarkers]);
 
   const priorityOptions = React.useMemo(() => {
-    return PRIORITY_OPTIONS.reduce(
-      (options, marker) => {
-        return [...options, { label: marker, value: marker }];
-      },
-      [DEFAULT_OPTION],
-    );
-  }, []);
+    const labels =
+      graphMode === 'db'
+        ? [
+            { label: 'URGENT', value: TaskPriority.URGENT },
+            { label: 'HIGH', value: TaskPriority.HIGH },
+            { label: 'MEDIUM', value: TaskPriority.MEDIUM },
+            { label: 'LOW', value: TaskPriority.LOW },
+            { label: 'NONE', value: TaskPriority.NONE },
+          ]
+        : PRIORITY_OPTIONS.map((value) => ({ label: value, value }));
+    return [DEFAULT_OPTION, ...labels];
+  }, [graphMode]);
 
   const selectClassNames = React.useMemo(
     () => ({
@@ -67,7 +76,9 @@ const TaskFilter: React.FC = () => {
   );
 
   React.useEffect(() => {
-    const marker = markerOptions.find((marker) => marker.value === settings.defaultMarker);
+    const marker = markerOptions.find((marker) =>
+      statusNamesMatch(marker.value, settings.defaultMarker),
+    );
     if (marker) {
       setMarker(marker);
     }
@@ -94,7 +105,9 @@ const TaskFilter: React.FC = () => {
     >
       <div className="flex flex-row">
         <div className="flex flex-row items-center">
-          <span className="text-xs">Marker:</span>
+          <span className="text-xs">
+            {graphMode === 'db' ? 'Status:' : 'Marker:'}
+          </span>
           <Select
             classNames={selectClassNames}
             theme={selectTheme}

@@ -3,6 +3,8 @@ import { atom, AtomEffect, selector } from 'recoil';
 import { logseq as plugin } from '../../package.json';
 import { TaskMarker } from '../models/TaskEntity';
 import { settingsState } from './settings';
+import { dbTaskMetadataState, graphModeState } from './graph';
+import { getActiveDbStatuses } from '../logseq-db';
 
 export const USER_CONFIGS_KEY = `${plugin.id}#userConfigs`;
 
@@ -51,8 +53,20 @@ export const taskMarkersState = selector<(TaskMarker | string)[]>({
   get: ({ get }) => {
     const { preferredWorkflow } = get(userConfigsState);
     const settings = get(settingsState);
+    const graphMode = get(graphModeState);
+    const dbMetadata = get(dbTaskMetadataState);
     const customMarkers =
-      settings.customMarkers === '' ? [] : settings.customMarkers.split(',');
+      settings.customMarkers === ''
+        ? []
+        : settings.customMarkers
+            .split(',')
+            .map((marker) => marker.trim())
+            .filter(Boolean);
+    if (graphMode === 'db') {
+      return getActiveDbStatuses(dbMetadata, customMarkers).map(
+        (status) => status.name,
+      );
+    }
     if (preferredWorkflow === 'now') {
       return [TaskMarker.LATER, TaskMarker.NOW, ...customMarkers];
     }

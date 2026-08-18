@@ -1,6 +1,6 @@
 # Logseq Todo Plugin
 
-A simple to-do list plugin for logseq
+A simple to-do list plugin for Logseq file and database graphs.
 
 > This plugin relies solely on the Logseq Plugin API to access local data, and does not store it externally.
 
@@ -11,6 +11,7 @@ A simple to-do list plugin for logseq
 - View all of today's to-do items (include scheduled & today's journal page).
 - View all to-do items without a schedule.
 - Ignore to-do items on a specified page.
+- Use native statuses, priorities, scheduled dates, and task tags in Logseq 2 database graphs.
 
 ![](./screenshots/plugin-panel.png)
 
@@ -30,7 +31,9 @@ A simple to-do list plugin for logseq
 
 - Pin the plugin to the top bar
 - Now To-do items can be easily created or edited from the menu bar through the dedicated icon.
-- To set task priority (options are `A`=HIGH, `B`=MEDIUM, `C`=LOW), add `[#A]` to your marker. For example, `TODO [#C] text`.
+- In file graphs, set task priority with `A`=HIGH, `B`=MEDIUM, or `C`=LOW. For example, `TODO [#C] text`.
+- In Logseq 2 database graphs, the plugin reads and writes Logseq's structured Task status, priority, scheduled, and deadline properties. Backlog, Todo, Doing, and In Review are shown by default; Done and Canceled are hidden.
+- `Default Marker` and `Custom Markers` continue to work in database graphs. Legacy names such as `LATER`, `NOW`, and `WAITING` map to Todo, Doing, and Backlog, while custom values match status names.
 
 ## Page Properties
 

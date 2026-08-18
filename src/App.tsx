@@ -7,22 +7,21 @@ import TaskInput, { ITaskInputRef } from './components/TaskInput';
 import TaskSection, { GroupBy } from './components/TaskSection';
 import TaskFilter from './components/TaskFilter';
 import { logseq as plugin } from '../package.json';
-import { useRecoilState, useRecoilValue } from 'recoil';
+import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
 import { visibleState } from './state/visible';
 import { userConfigsState } from './state/user-configs';
 import { themeStyleState } from './state/theme';
-import getTodayTaskQuery from './querys/today';
-import getScheduledTaskQuery from './querys/scheduled';
-import getAnytimeTaskQuery from './querys/anytime';
 import { settingsState } from './state/settings';
 import * as api from './api';
-import getNextNDaysTaskQuery from './querys/next-n-days';
 import { fixPreferredDateFormat } from './utils';
 import './style.css';
 import { markerState, priorityState } from './state/filter';
-import { TaskMarker, TaskPriority } from './models/TaskEntity'
+import { TaskMarker, TaskPriority } from './models/TaskEntity';
 import { useRefreshAll } from './hooks/useRefreshAll';
 import { useHotKey } from './hooks/useHotKey';
+import { dbTaskMetadataState, graphModeState } from './state/graph';
+import { loadDbTaskMetadata } from './logseq-db';
+import { TaskSectionType } from './querys/sections';
 
 dayjs.extend(advancedFormat);
 
@@ -46,6 +45,8 @@ function App() {
   const marker = useRecoilValue(markerState);
   const priority = useRecoilValue(priorityState);
   const refreshAll = useRefreshAll();
+  const graphMode = useRecoilValue(graphModeState);
+  const setDbTaskMetadata = useSetRecoilState(dbTaskMetadataState);
 
   useHotKey(settings.hotkey);
 
@@ -57,8 +58,13 @@ function App() {
       refreshAll();
     }
 
-    window.logseq.App.getUserConfigs().then(setUserConfigs);
-  }, [visible, refreshAll, setUserConfigs]);
+    logseq.App.getUserConfigs().then((configs) => {
+      setUserConfigs((current) => ({ ...current, ...configs }));
+    });
+    if (graphMode === 'db') {
+      loadDbTaskMetadata().then(setDbTaskMetadata).catch(console.error);
+    }
+  }, [visible, refreshAll, setUserConfigs, graphMode, setDbTaskMetadata]);
 
   const handleClickOutside = (e: React.MouseEvent) => {
     if (!innerRef.current?.contains(e.target as unknown as Node)) {
@@ -67,19 +73,24 @@ function App() {
   };
 
   const createNewTask = async (content: string) => {
-    const { preferredDateFormat, preferredTodo} = userConfigs!;
+    const { preferredDateFormat, preferredTodo } = userConfigs!;
     const { whereToPlaceNewTask } = settings;
-    const date = dayjs().format(fixPreferredDateFormat(preferredDateFormat!));
+    const date = dayjs().format(
+      fixPreferredDateFormat(preferredDateFormat ?? 'yyyy-MM-dd'),
+    );
     await api.createNewTask(date, content, {
-      marker: marker.value || preferredTodo as TaskMarker,
+      graphMode,
+      marker:
+        marker.value ||
+        settings.defaultMarker ||
+        (graphMode === 'db'
+          ? TaskMarker.TODO
+          : (preferredTodo as TaskMarker) || TaskMarker.LATER),
       priority: priority.value as TaskPriority,
       whereToPlaceNewTask,
     });
     refreshAll();
   };
-
-  const customMarkers = settings.customMarkers.split(',');
-  const treatJournalEntriesAsScheduled = settings.treatJournalEntriesAsScheduled;
 
   return (
     <main
@@ -98,40 +109,20 @@ function App() {
             <TaskInput ref={inputRef} onCreateTask={createNewTask} />
             <TaskFilter />
             <div>
-              <TaskSection
-                title="Today"
-                query={
-                  getTodayTaskQuery(
-                    customMarkers,
-                    treatJournalEntriesAsScheduled,
-                  )
-                }
-              />
+              <TaskSection title="Today" section={TaskSectionType.Today} />
               {settings.showNextNDaysTask && (
                 <TaskSection
                   title={`Next ${settings.numberOfNextNDays} Days`}
-                  query={getNextNDaysTaskQuery(settings.numberOfNextNDays)}
+                  section={TaskSectionType.NextNDays}
                 />
               )}
               <TaskSection
                 title="Scheduled"
-                query={
-                  settings.showNextNDaysTask
-                    ? getScheduledTaskQuery(
-                        treatJournalEntriesAsScheduled,
-                        dayjs().add(settings.numberOfNextNDays, 'd'),
-                      )
-                    : getScheduledTaskQuery(treatJournalEntriesAsScheduled)
-                }
+                section={TaskSectionType.Scheduled}
               />
               <TaskSection
                 title="Anytime"
-                query={
-                  getAnytimeTaskQuery(
-                    customMarkers,
-                    treatJournalEntriesAsScheduled,
-                  )
-                }
+                section={TaskSectionType.Anytime}
                 groupBy={GroupBy.Page}
               />
             </div>

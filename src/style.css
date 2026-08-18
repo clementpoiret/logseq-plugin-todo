@@ -1,3 +1,9 @@
+.priority-urgent {
+  .rc-checkbox-inner {
+    @apply border-purple-500 !important;
+  }
+}
+
 .priority-a {
   .rc-checkbox-inner {
     @apply border-red-500 !important;

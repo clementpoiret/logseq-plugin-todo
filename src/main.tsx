@@ -5,6 +5,8 @@ import { RecoilRoot } from 'recoil';
 import { logseq as plugin } from '../package.json';
 import App from './App';
 import settings from './settings';
+import { detectGraphMode } from './logseq-db';
+import { graphModeState } from './state/graph';
 
 type Rect = {
   top: number;
@@ -70,7 +72,8 @@ function registerHotKey(binding: string) {
   registeredHotKeySet.add(binding);
 }
 
-function main() {
+async function main() {
+  const graphMode = await detectGraphMode();
   logseq.setMainUIInlineStyle({
     position: 'fixed',
     zIndex: 11,
@@ -105,7 +108,7 @@ function main() {
   const root = ReactDOM.createRoot(document.getElementById('app')!);
   root.render(
     <React.StrictMode>
-      <RecoilRoot>
+      <RecoilRoot initializeState={({ set }) => set(graphModeState, graphMode)}>
         <App />
       </RecoilRoot>
     </React.StrictMode>,

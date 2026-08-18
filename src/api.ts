@@ -1,6 +1,15 @@
 import { BlockEntity } from '@logseq/libs/dist/LSPlugin.user';
 import dayjs from 'dayjs';
 import { TaskEntityObject, TaskMarker, TaskPriority } from './models/TaskEntity';
+import { GraphMode } from './state/graph';
+import {
+  DB_PROPERTY,
+  DB_STATUS,
+  dbPropertyApiKey,
+  findPriorityChoice,
+  findStatusChoice,
+  loadDbTaskMetadata,
+} from './logseq-db';
 
 export const MARKER_GROUPS: Record<string, TaskMarker[]> = {
   [TaskMarker.TODO]: [TaskMarker.TODO, TaskMarker.DOING],
@@ -8,57 +17,155 @@ export const MARKER_GROUPS: Record<string, TaskMarker[]> = {
 };
 
 export interface ITaskOptions {
+  graphMode?: GraphMode;
   marker?: TaskMarker | string;
   markerGroup?: (TaskMarker | string)[];
-  priority?: TaskPriority;
+  priority?: TaskPriority | string;
   whereToPlaceNewTask?: string;
 }
 
 export function isTodayTask(task: TaskEntityObject) {
   const { scheduled } = task;
   if (!scheduled) return false;
-  return dayjs(new Date()).format('YYYYMMDD') === scheduled.toString();
+  return dayjs().format('YYYYMMDD') === scheduled.toString();
 }
 
-export async function createNewTask(date: string, content: string, opts: ITaskOptions) {
-  const { marker, priority, whereToPlaceNewTask } = opts;
-  const rawContent = `${marker} ${priority ? `[#${priority}]` : ''} ${content}`;
-  let page = await window.logseq.Editor.getPage(date);
-  if (page === null) {
-    page = await window.logseq.Editor.createPage(date, {
-      journal: true,
-      redirect: false,
-    });
-  }
-  const blocksTree = await window.logseq.Editor.getPageBlocksTree(date);
+function blockText(block: BlockEntity) {
+  return block.title ?? block.content ?? '';
+}
 
-  if (whereToPlaceNewTask) {
-    let parentBlock = blocksTree.find(
-      (block: BlockEntity) => block.content === whereToPlaceNewTask,
+async function insertTaskBlock(
+  page: { name: string; uuid: string },
+  content: string,
+  whereToPlaceNewTask?: string,
+) {
+  const blocksTree =
+    (await logseq.Editor.getPageBlocksTree(page.uuid)) ?? [];
+  if (!whereToPlaceNewTask) {
+    return logseq.Editor.appendBlockInPage(page.name, content);
+  }
+
+  let parentBlock = blocksTree.find(
+    (block) => blockText(block) === whereToPlaceNewTask,
+  );
+  if (!parentBlock) {
+    parentBlock =
+      (await logseq.Editor.appendBlockInPage(page.name, whereToPlaceNewTask)) ??
+      undefined;
+  }
+  if (!parentBlock) throw new Error('Unable to create the task parent block.');
+  return logseq.Editor.insertBlock(parentBlock.uuid, content);
+}
+
+async function createDbTask(content: string, opts: ITaskOptions) {
+  const metadata = await loadDbTaskMetadata();
+  const status =
+    findStatusChoice(metadata, opts.marker) ??
+    metadata.statuses.find((choice) => choice.ident === DB_STATUS.todo);
+  if (!status) throw new Error('Logseq Todo status is unavailable.');
+
+  const taskTag =
+    (await logseq.Editor.getTag('logseq.class/Task')) ??
+    (await logseq.Editor.getTag('Task'));
+  if (!taskTag) throw new Error('Logseq Task tag is unavailable.');
+
+  let page = await logseq.Editor.getTodayPage();
+  if (!page) page = await logseq.Editor.createJournalPage(new Date());
+  if (!page) throw new Error("Unable to open today's journal page.");
+
+  const block = await insertTaskBlock(
+    page,
+    content,
+    opts.whereToPlaceNewTask,
+  );
+  if (!block) throw new Error('Unable to create the task block.');
+
+  try {
+    await logseq.Editor.addBlockTag(block.uuid, taskTag.uuid);
+    await logseq.Editor.upsertBlockProperty(
+      block.uuid,
+      dbPropertyApiKey(DB_PROPERTY.status),
+      status.id,
     );
-    if (parentBlock === undefined) {
-      parentBlock = (await window.logseq.Editor.appendBlockInPage(
-        page!.name,
-        whereToPlaceNewTask,
-      )) as BlockEntity;
-    }
-    await window.logseq.Editor.insertBlock(parentBlock!.uuid, rawContent);
-  } else {
-    await window.logseq.Editor.appendBlockInPage(page!.name, rawContent);
-  }
 
-  if (blocksTree.length === 1 && blocksTree[0].content === '') {
-    await window.logseq.Editor.removeBlock(blocksTree[0].uuid);
+    const priority = findPriorityChoice(metadata, opts.priority);
+    if (priority) {
+      await logseq.Editor.upsertBlockProperty(
+        block.uuid,
+        dbPropertyApiKey(DB_PROPERTY.priority),
+        priority.id,
+      );
+    }
+  } catch (error) {
+    await logseq.Editor.removeBlock(block.uuid);
+    throw error;
   }
+}
+
+async function createLegacyTask(
+  date: string,
+  content: string,
+  opts: ITaskOptions,
+) {
+  const marker = opts.marker ?? TaskMarker.LATER;
+  const priority = opts.priority;
+  const rawContent = `${marker}${priority ? ` [#${priority}]` : ''} ${content}`;
+  let page = await logseq.Editor.getPage(date);
+  if (!page) {
+    page = await logseq.Editor.createPage(
+      date,
+      {},
+      { journal: true, redirect: false },
+    );
+  }
+  if (!page) throw new Error("Unable to create today's journal page.");
+
+  const blocksTree = (await logseq.Editor.getPageBlocksTree(page.uuid)) ?? [];
+  const block = await insertTaskBlock(
+    page,
+    rawContent,
+    opts.whereToPlaceNewTask,
+  );
+  if (!block) throw new Error('Unable to create the task block.');
+
+  if (blocksTree.length === 1 && blockText(blocksTree[0]) === '') {
+    await logseq.Editor.removeBlock(blocksTree[0].uuid);
+  }
+}
+
+export async function createNewTask(
+  date: string,
+  content: string,
+  opts: ITaskOptions,
+) {
+  if (opts.graphMode === 'db') return createDbTask(content, opts);
+  return createLegacyTask(date, content, opts);
 }
 
 export async function toggleTaskStatus(
   task: TaskEntityObject,
   options: ITaskOptions & Required<Pick<ITaskOptions, 'marker'>>,
 ) {
-  const { uuid, completed, marker } = task;
-  const nextMarker = completed ? options.marker : TaskMarker.DONE;
-  await window.logseq.Editor.updateBlock(uuid, task.rawContent.replace(marker, nextMarker));
+  if (task.graphMode === 'db') {
+    const metadata = await loadDbTaskMetadata();
+    const nextStatus = task.completed
+      ? findStatusChoice(metadata, options.marker) ??
+        metadata.statuses.find((choice) => choice.ident === DB_STATUS.todo)
+      : metadata.statuses.find((choice) => choice.ident === DB_STATUS.done);
+    if (!nextStatus) throw new Error('Unable to resolve the next task status.');
+    return logseq.Editor.upsertBlockProperty(
+      task.uuid,
+      dbPropertyApiKey(DB_PROPERTY.status),
+      nextStatus.id,
+    );
+  }
+
+  const nextMarker = task.completed ? options.marker : TaskMarker.DONE;
+  const newContent = task.rawContent.replace(
+    new RegExp(`^${escapeRegExp(task.marker)}`),
+    nextMarker,
+  );
+  return logseq.Editor.updateBlock(task.uuid, newContent);
 }
 
 interface IOpenTaskOptions {
@@ -66,50 +173,90 @@ interface IOpenTaskOptions {
 }
 
 export function openTask(task: TaskEntityObject, opts?: IOpenTaskOptions) {
-  const { uuid } = task;
   if (opts?.openInRightSidebar) {
-    return window.logseq.Editor.openInRightSidebar(uuid);
+    return logseq.Editor.openInRightSidebar(task.uuid);
   }
-  return window.logseq.Editor.scrollToBlockInPage(task.page.name, uuid);
+  return logseq.Editor.scrollToBlockInPage(task.page.name, task.uuid);
 }
 
-export function openTaskPage(page: TaskEntityObject['page'], opts?: IOpenTaskOptions) {
+export function openTaskPage(
+  page: TaskEntityObject['page'],
+  opts?: IOpenTaskOptions,
+) {
   if (opts?.openInRightSidebar) {
-    return window.logseq.Editor.openInRightSidebar(page.uuid);
+    return logseq.Editor.openInRightSidebar(page.uuid);
   }
-  return window.logseq.Editor.scrollToBlockInPage(page.name, page.uuid);
+  return logseq.Editor.scrollToBlockInPage(page.name, page.uuid);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export async function toggleTaskMarker(
   task: TaskEntityObject,
   options: ITaskOptions & Required<Pick<ITaskOptions, 'markerGroup'>>,
 ) {
-  const { uuid, rawContent, marker } = task;
   const { markerGroup } = options;
-  const currentMarkIndex = markerGroup.findIndex((m) => m === marker);
-  const newMarker = markerGroup[(currentMarkIndex + 1) % markerGroup.length];
+  if (markerGroup.length === 0) return;
+  const currentIndex = markerGroup.findIndex((marker) => marker === task.marker);
+  const newMarker = markerGroup[(currentIndex + 1) % markerGroup.length];
 
-  const newRawContent = rawContent.replace(new RegExp(`^${marker}`), newMarker);
-  await window.logseq.Editor.updateBlock(uuid, newRawContent);
-}
-
-export async function setTaskScheduled(task: TaskEntityObject, date: Date | null) {
-  const { uuid, rawContent } = task;
-  let newRawContent = task.rawContent;
-  if (date === null) {
-    newRawContent = rawContent.replace(/SCHEDULED: <[^>]+>/, '');
-    await window.logseq.Editor.updateBlock(uuid, newRawContent);
-    return;
+  if (task.graphMode === 'db') {
+    const metadata = await loadDbTaskMetadata();
+    const status = findStatusChoice(metadata, newMarker);
+    if (!status) throw new Error(`Unknown Logseq task status: ${newMarker}`);
+    return logseq.Editor.upsertBlockProperty(
+      task.uuid,
+      dbPropertyApiKey(DB_PROPERTY.status),
+      status.id,
+    );
   }
 
-  const scheduledString = `SCHEDULED: <${dayjs(date).format('YYYY-MM-DD ddd')}>`;
-  if (rawContent.includes('SCHEDULED')) {
-    newRawContent = rawContent.replace(/SCHEDULED: <[^>]+>/, scheduledString);
+  const newRawContent = task.rawContent.replace(
+    new RegExp(`^${escapeRegExp(task.marker)}`),
+    newMarker,
+  );
+  return logseq.Editor.updateBlock(task.uuid, newRawContent);
+}
+
+export async function setTaskScheduled(
+  task: TaskEntityObject,
+  date: Date | null,
+) {
+  if (task.graphMode === 'db') {
+    if (date === null) {
+      return logseq.Editor.removeBlockProperty(
+        task.uuid,
+        dbPropertyApiKey(DB_PROPERTY.scheduled),
+      );
+    }
+    return logseq.Editor.upsertBlockProperty(
+      task.uuid,
+      dbPropertyApiKey(DB_PROPERTY.scheduled),
+      dayjs(date).startOf('day').valueOf(),
+    );
+  }
+
+  let newRawContent = task.rawContent;
+  if (date === null) {
+    newRawContent = task.rawContent.replace(/SCHEDULED: <[^>]+>/, '');
+    return logseq.Editor.updateBlock(task.uuid, newRawContent);
+  }
+
+  const scheduledString = `SCHEDULED: <${dayjs(date).format(
+    'YYYY-MM-DD ddd',
+  )}>`;
+  if (task.rawContent.includes('SCHEDULED')) {
+    newRawContent = task.rawContent.replace(
+      /SCHEDULED: <[^>]+>/,
+      scheduledString,
+    );
   } else {
-    const lines = rawContent.split('\n');
+    const lines = task.rawContent.split('\n');
     lines.splice(1, 0, scheduledString);
     newRawContent = lines.join('\n');
   }
 
-  await window.logseq.Editor.updateBlock(uuid, newRawContent);
+  return logseq.Editor.updateBlock(task.uuid, newRawContent);
 }

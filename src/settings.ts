@@ -13,14 +13,15 @@ const settings: SettingSchemaDesc[] = [
     type: 'string',
     title: 'Default Marker',
     description:
-      'Assign a default marker to new to-do items and filter your to-do list by markers',
+      'Assign a default marker (or status in a database graph) to new to-do items and filter your to-do list',
     default: '',
   },
   {
     key: 'customMarkers',
     type: 'string',
     title: 'Custom Markers',
-    description: 'Custom Markers, separate multiple tags with commas',
+    description:
+      'Custom markers or database status names, separated with commas',
     default: 'WAITING',
   },
   {

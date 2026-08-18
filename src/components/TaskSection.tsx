@@ -14,6 +14,8 @@ import { settingsState } from '../state/settings';
 import { openTask, openTaskPage } from '../api';
 import { inputState } from '../state/input';
 import { ChevronsRight } from 'tabler-icons-react';
+import { graphModeState } from '../state/graph';
+import { TaskSectionType } from '../querys/sections';
 
 export enum GroupBy {
   Page,
@@ -23,75 +25,81 @@ export enum GroupBy {
 
 export interface ITaskSectionProps {
   title: string;
-  query: string;
+  section: TaskSectionType;
   groupBy?: GroupBy;
 }
 
 const TaskSection: React.FC<ITaskSectionProps> = (props) => {
-  const { title, query } = props;
+  const { title, section } = props;
   const [tasks, setTasks] = useState<TaskEntityObject[]>([]);
   const visible = useRecoilValue(visibleState);
-  const tasksLoadable = useRecoilValueLoadable(filterdTasksState(query));
+  const graphMode = useRecoilValue(graphModeState);
+  const settings = useRecoilValue(settingsState);
+  const queryOptions = useMemo(
+    () => ({
+      graphMode,
+      customMarkers: settings.customMarkers
+        .split(',')
+        .map((marker) => marker.trim())
+        .filter(Boolean),
+      treatJournalEntriesAsScheduled:
+        settings.treatJournalEntriesAsScheduled,
+      section,
+      numberOfNextNDays: settings.numberOfNextNDays,
+      showNextNDaysTask: settings.showNextNDaysTask,
+    }),
+    [graphMode, section, settings],
+  );
+  const tasksLoadable = useRecoilValueLoadable(
+    filterdTasksState(queryOptions),
+  );
   const themeStyle = useRecoilValue(themeStyleState);
-  const { openInRightSidebar } = useRecoilValue(settingsState);
+  const { openInRightSidebar } = settings;
   const input = useRecoilValue(inputState);
 
   const refreshAll = useRecoilCallback(
     ({ snapshot, refresh }) =>
       () => {
-        for (const node of snapshot.getNodes_UNSTABLE()) {
-          refresh(node);
-        }
+        for (const node of snapshot.getNodes_UNSTABLE()) refresh(node);
       },
     [],
   );
 
   useEffect(() => {
     switch (tasksLoadable.state) {
-      case 'hasValue': {
-        const tasks = tasksLoadable.contents.filter(
-          (task: TaskEntityObject) => {
-            return task.content.toLowerCase().includes(input.toLowerCase());
-          },
+      case 'hasValue':
+        setTasks(
+          tasksLoadable.contents.filter((task) =>
+            task.content.toLowerCase().includes(input.toLowerCase()),
+          ),
         );
-        setTasks(tasks);
         break;
-      }
       case 'hasError':
         throw tasksLoadable.contents;
     }
   }, [tasksLoadable.state, tasksLoadable.contents, input]);
 
   useEffect(() => {
-    if (visible) {
-      refreshAll();
-    }
+    if (visible) refreshAll();
   }, [visible, refreshAll]);
 
   const taskGroups = useMemo(() => {
     switch (props.groupBy) {
       case GroupBy.Page:
-        return groupBy(tasks, (task: TaskEntityObject) => task.page.name);
+        return groupBy(tasks, (task) => task.page.name);
       default:
         return { '': tasks };
     }
   }, [props.groupBy, tasks]);
 
   const openTaskGroups = React.useCallback(() => {
-    const tasksCopy = [...tasks];
-    tasksCopy.reverse();
-
-    tasksCopy.forEach((task) => {
-      openTask(task, {
-        openInRightSidebar: true,
-      });
+    [...tasks].reverse().forEach((task) => {
+      openTask(task, { openInRightSidebar: true });
     });
-    window.logseq.hideMainUI();
+    logseq.hideMainUI();
   }, [tasks]);
 
-  if (tasks.length === 0) {
-    return null;
-  }
+  if (tasks.length === 0) return null;
 
   return (
     <div className="py-1">
@@ -110,8 +118,8 @@ const TaskSection: React.FC<ITaskSectionProps> = (props) => {
         </div>
       </div>
       <div>
-        {(Object.entries(taskGroups) ?? []).map(([name, tasks]) => {
-          const [{ page }] = tasks;
+        {Object.entries(taskGroups).map(([name, groupTasks]) => {
+          const [{ page }] = groupTasks;
           return (
             <div key={name}>
               {name && (
@@ -122,7 +130,7 @@ const TaskSection: React.FC<ITaskSectionProps> = (props) => {
                   {name}
                 </h3>
               )}
-              {(tasks ?? []).map((task) => (
+              {groupTasks.map((task) => (
                 <TaskItem key={task.uuid} task={task} onChange={refreshAll} />
               ))}
             </div>
