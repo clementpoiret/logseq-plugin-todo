@@ -105,27 +105,38 @@ function App() {
             borderColor: themeStyle.secondaryBackgroundColor,
           }}
         >
-          <ErrorBoundary FallbackComponent={ErrorFallback}>
+          {/*
+            The DB graph worker may not be connected yet when the plugin loads,
+            so tasks are only queried while the panel is open, and toggling the
+            panel clears a failed render so the next open queries again.
+          */}
+          <ErrorBoundary
+            FallbackComponent={ErrorFallback}
+            resetKeys={[visible]}
+            onResetKeysChange={refreshAll}
+          >
             <TaskInput ref={inputRef} onCreateTask={createNewTask} />
             <TaskFilter />
-            <div>
-              <TaskSection title="Today" section={TaskSectionType.Today} />
-              {settings.showNextNDaysTask && (
+            {visible && (
+              <div>
+                <TaskSection title="Today" section={TaskSectionType.Today} />
+                {settings.showNextNDaysTask && (
+                  <TaskSection
+                    title={`Next ${settings.numberOfNextNDays} Days`}
+                    section={TaskSectionType.NextNDays}
+                  />
+                )}
                 <TaskSection
-                  title={`Next ${settings.numberOfNextNDays} Days`}
-                  section={TaskSectionType.NextNDays}
+                  title="Scheduled"
+                  section={TaskSectionType.Scheduled}
                 />
-              )}
-              <TaskSection
-                title="Scheduled"
-                section={TaskSectionType.Scheduled}
-              />
-              <TaskSection
-                title="Anytime"
-                section={TaskSectionType.Anytime}
-                groupBy={GroupBy.Page}
-              />
-            </div>
+                <TaskSection
+                  title="Anytime"
+                  section={TaskSectionType.Anytime}
+                  groupBy={GroupBy.Page}
+                />
+              </div>
+            )}
           </ErrorBoundary>
         </div>
       </div>
